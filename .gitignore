@@ -1,2 +1,6 @@
 *.pdf
 .idea/
+
+src/gym_practice.py
+
+*/__pycache__/

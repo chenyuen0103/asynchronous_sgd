@@ -186,10 +186,12 @@ def plot_wait_time(df, n_workers):
     plt.show()
 
 def plot_partitioning_time(df, n_workers):
-    df[df['n_workers'] == n_workers].plot(x='S', y=['naive_time', 'exact_time'], kind='line')
+
+    df[df['n_workers'] == n_workers].plot(x='S', y=['naive_partition_time', 'exact_partition_time'], kind='line')
     plt.xlabel('S')
     plt.ylabel('Partitioning Time')
     plt.title(f'Partitioning Time vs. S (n_workers = {n_workers})')
+    # plt.ylim(0,200)
     plt.show()
 
 
@@ -204,8 +206,8 @@ def main():
     results = pd.DataFrame(columns=['S', 'n_workers', 'naive_max_wait', 'naive_partition_time', 'exact_max_wait', 'exact_partition_time'])
 
     for S in [64, 128, 256, 512, 1024, 2048, 4096, 8192]:  # Example S values
-        for n_workers in [10, 20, 50, 100]:  # Example worker counts
-            print(f"Running for S = {S} and n_workers = {n_workers}")
+        for n_workers in np.arange(10, 1001, 10):
+            # print(f"Running for S = {S} and n_workers = {n_workers}")
             # Simulate communication and computation costs
             # Simulate costs
             tau_m = simulate_communication_costs(n_workers, distribution="lognormal", sigma=sigma_m_comm,
@@ -214,8 +216,8 @@ def main():
                                                     scale=np.exp(mu_comp))
 
 
-            print("Computation Costs:", tau)
-            print("Communication Costs:", tau_m)
+            # print("Computation Costs:", tau)
+            # print("Communication Costs:", tau_m)
 
             # Naive Partitions
             b, cost, naive_physic_time = naive_partitions(tau, tau_m, S)
@@ -223,14 +225,23 @@ def main():
 
             # Exact Partitions
             # terminate the function of waiting for the result after 500 seconds
-            b_exact, cost_exact, exact_physic_time = exact_partitions_ip(tau, tau_m, S)
+            # b_exact, cost_exact, exact_physic_time = exact_partitions_ip(tau, tau_m, S)
+            b_exact, cost_exact, exact_physic_time = None, None, None
             #append row to the dataframe
-            result = {'S': S,
-                      'n_workers': n_workers,
-                      'naive_max_wait': max(cost) - min(cost),
-                      'naive_partition_time': naive_physic_time,
-                      'exact_max_wait': max(cost_exact) - min(cost_exact),
-                      'exact_partition_time': exact_physic_time}
+            if b_exact is not None:
+                result = {'S': S,
+                          'n_workers': n_workers,
+                          'naive_max_wait': max(cost) - min(cost),
+                          'naive_partition_time': naive_physic_time,
+                          'exact_max_wait': max(cost_exact) - min(cost_exact),
+                          'exact_partition_time': exact_physic_time}
+            else:
+                result = {'S': S,
+                          'n_workers': n_workers,
+                          'naive_max_wait': max(cost) - min(cost),
+                          'naive_partition_time': naive_physic_time,
+                          'exact_max_wait': None,
+                          'exact_partition_time': None}
             # Add this row to the DataFrame
 
 
@@ -238,15 +249,22 @@ def main():
             results.loc[len(results)] = result
 
 
-            results.to_csv('./partition_results.csv', index=False)
-            print("Results:", result)
+            results.to_csv('./partition_results_naive.csv', index=False)
+            # print("Results:", result)
 
     # Example plotting usage
-    plot_wait_time(results, 100)  # Plot with n_workers = 100
-    plot_partitioning_time(results, 50)  # Plot with n_workers = 50
+    # results = pd.read_csv('./partition_results.csv')
+    plot_wait_time(results, 1000)  # Plot with n_workers = 100
+    plot_partitioning_time(results, 1000)  # Plot with n_workers = 50
+
+    results[results['S'] == 4096].plot(x='n_workers', y=['naive_max_wait'], kind='line')
+    plt.xlabel('n_workers')
+    plt.ylabel('Max Wait Time')
+    plt.title(f'Wait Time vs. n_workers (S = 4096)')
+    plt.show()
 
     # Correlations
-    for metric in ['naive_max_wait', 'naive_time', 'exact_max_wait', 'exact_time']:
+    for metric in ['naive_max_wait', 'naive_partition_time', 'exact_max_wait', 'exact_partition_time']:
         print(f"Correlation between S and {metric}: {results['S'].corr(results[metric])}")
         print(f"Correlation between n_workers and {metric}: {results['n_workers'].corr(results[metric])}")
 
