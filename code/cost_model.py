@@ -1,6 +1,14 @@
 import numpy as np
 import random
+import pulp
+import itertools
+import time
 from scipy.stats import weibull_min, lognorm
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import multiprocessing
+import queue
 
 random.seed(0)
 np.random.seed(0)
@@ -107,12 +115,13 @@ def simulate_computation_costs(n_workers, distribution="normal", **kwargs):
         raise ValueError("Unsupported distribution type.")
     pass
 
-def patitions(tau, tau_m, S):
+def naive_partitions(tau, tau_m, S):
     '''partition S data samples into len(tau) workers
     Args:
     tau: list of size len(tau) - 1, the cost of computation at each worker
     tau_m: list of size len(tau) - 1, the cost of communication at each worker
     '''
+    start_time = time.time()
     b = np.zeros(len(tau))
     inv_sum = sum([1/tau[i] for i in range(len(tau_m))])
     comm_over_comp = sum([tau_m[i]/tau[i] for i in range(len(tau_m))])
@@ -123,28 +132,123 @@ def patitions(tau, tau_m, S):
     b = np.round(b)
     b[-1] = S - sum(b[:-1])
     assert np.allclose(sum(b), S)
-    return b
+    costs = [tau[i] * b[i] + 2*tau_m[i] for i in range(len(tau_m))]
+    end = time.time()
+    return b, costs, end - start_time
+
+
+
+def exact_partitions_ip(tau, tau_m, S):
+    start_time = time.time()
+    n = len(tau)
+
+    # Create the optimization model
+    model = pulp.LpProblem("Exact Partitions", pulp.LpMinimize)
+
+    # Decision variables
+    b = [pulp.LpVariable(f"b[{i}]", lowBound=0, cat='Integer') for i in range(n)]
+
+    # Auxiliary variable
+    z = pulp.LpVariable("z", lowBound=0)
+
+    # Objective function
+    model += z
+
+    # Constraints
+    model += pulp.lpSum(b) == S  # Sum constraint
+    for i in range(n):
+        for j in range(n):
+            model += tau[i] * b[i] + 2 * tau_m[i] - tau[j] * b[j] - 2 * tau_m[j] <= z
+            model += -(tau[i] * b[i] + 2 * tau_m[i] - tau[j] * b[j] - 2 * tau_m[j]) <= z
+
+    # Solve
+    model.solve()
+
+    if pulp.LpStatus[model.status] == 'Optimal':
+        optimal_partition = [int(var.value()) for var in b]
+        costs = [tau[i] * optimal_partition[i] + 2 * tau_m[i] for i in range(n)]
+        end = time.time() # Put results on the queue
+        return optimal_partition, costs, end - start_time  # Then return
+
+    else:
+        print("No optimal solution found.") # Indicate failure
+        return None, None, None
+
+
+
+
+# Plotting functions
+def plot_wait_time(df, n_workers):
+    df[df['n_workers'] == n_workers].plot(x='S', y=['naive_max_wait', 'exact_max_wait'], kind='line')
+    plt.xlabel('S')
+    plt.ylabel('Max Wait Time')
+    plt.title(f'Wait Time vs. S (n_workers = {n_workers})')
+    plt.show()
+
+def plot_partitioning_time(df, n_workers):
+    df[df['n_workers'] == n_workers].plot(x='S', y=['naive_time', 'exact_time'], kind='line')
+    plt.xlabel('S')
+    plt.ylabel('Partitioning Time')
+    plt.title(f'Partitioning Time vs. S (n_workers = {n_workers})')
+    plt.show()
+
+
 
 def main():
-    n_workers = 10
+    n_workers = 100
     # Parameters for communication cost (Log-normal)
     mu_m_comm, sigma_m_comm = 0, 0.25  # Example parameters for communication cost
     # Parameters for computation cost (Log-normal)
     mu_comp, sigma_comp = 0, 0.25  # Example parameters for computation cost
 
-    # Simulate costs
-    comm_costs = simulate_communication_costs(n_workers, distribution="lognormal", sigma=sigma_m_comm, scale=np.exp(mu_m_comm))
-    comp_costs = simulate_computation_costs(n_workers, distribution="lognormal", sigma=sigma_comp, scale=np.exp(mu_comp))
+    results = pd.DataFrame(columns=['S', 'n_workers', 'naive_max_wait', 'naive_partition_time', 'exact_max_wait', 'exact_partition_time'])
 
-    print("Communication Costs:", comm_costs)
-    print("Computation Costs:", comp_costs)
+    for S in [64, 128, 256, 512, 1024, 2048, 4096, 8192]:  # Example S values
+        for n_workers in [10, 20, 50, 100]:  # Example worker counts
+            print(f"Running for S = {S} and n_workers = {n_workers}")
+            # Simulate communication and computation costs
+            # Simulate costs
+            tau_m = simulate_communication_costs(n_workers, distribution="lognormal", sigma=sigma_m_comm,
+                                                      scale=np.exp(mu_m_comm))
+            tau = simulate_computation_costs(n_workers, distribution="lognormal", sigma=sigma_comp,
+                                                    scale=np.exp(mu_comp))
 
-    # Simulate partitioning
-    tau = comp_costs
-    tau_m = comm_costs
-    S = 1000
-    b = patitions(tau, tau_m, S)
-    print("Partitions:", b)
+
+            print("Computation Costs:", tau)
+            print("Communication Costs:", tau_m)
+
+            # Naive Partitions
+            b, cost, naive_physic_time = naive_partitions(tau, tau_m, S)
+
+
+            # Exact Partitions
+            # terminate the function of waiting for the result after 500 seconds
+            b_exact, cost_exact, exact_physic_time = exact_partitions_ip(tau, tau_m, S)
+            #append row to the dataframe
+            result = {'S': S,
+                      'n_workers': n_workers,
+                      'naive_max_wait': max(cost) - min(cost),
+                      'naive_partition_time': naive_physic_time,
+                      'exact_max_wait': max(cost_exact) - min(cost_exact),
+                      'exact_partition_time': exact_physic_time}
+            # Add this row to the DataFrame
+
+
+            # Insert the new row using loc
+            results.loc[len(results)] = result
+
+
+            results.to_csv('./partition_results.csv', index=False)
+            print("Results:", result)
+
+    # Example plotting usage
+    plot_wait_time(results, 100)  # Plot with n_workers = 100
+    plot_partitioning_time(results, 50)  # Plot with n_workers = 50
+
+    # Correlations
+    for metric in ['naive_max_wait', 'naive_time', 'exact_max_wait', 'exact_time']:
+        print(f"Correlation between S and {metric}: {results['S'].corr(results[metric])}")
+        print(f"Correlation between n_workers and {metric}: {results['n_workers'].corr(results[metric])}")
 
 
 if __name__ == "__main__":
