@@ -26,13 +26,6 @@ def generate_computation_cost(mu, sigma, n):
 
 
 
-def simulation_cost_model(n, mu_m, sigma_m, mu, sigma):
-    ''' simulate the cost of communication and computation for n workers'''
-    communication_cost = generate_communication_cost(mu_m, sigma_m, n)
-    computation_cost = generate_computation_cost(mu, sigma, n)
-    return communication_cost, computation_cost
-
-
 def simulate_communication_costs(n_workers, distribution="normal", **kwargs):
     """
     Simulates communication costs for a given number of workers.

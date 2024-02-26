@@ -15,4 +15,17 @@ config = {
     # "max_seed" is not explicitly in the run function arguments, but could be necessary for seed generation
     "max_seed": 1000000,       # An arbitrary large number for seed generation
     # Add any other configurations as needed
+    'COST_DISTRIBUTION_PARAMS':{
+    "communication": {
+        "distribution": "lognormal",
+        "mu_m": 0,  # Mean of the log-normal distribution for communication
+        "sigma_m": 1,  # Standard deviation of the log-normal distribution for communication
+    },
+    "computation": {
+        "distribution": "lognormal",
+        "mu": 0,  # Mean of the log-normal distribution for computation
+        "sigma": 1,  # Standard deviation of the log-normal distribution for computation
+    },
+    # "n_workers": 4,  # Number of workers in the distributed system
+    }
 }

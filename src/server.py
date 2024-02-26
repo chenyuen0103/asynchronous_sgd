@@ -19,7 +19,11 @@ class ParameterServer(object):
         return self.x
 
     def get_x(self):
+        print("Getting x...")  # Log start
+        # Your existing code to retrieve x
+        print("Got x.")  # Log completion
         return self.x
+
 
     def update_lr(self, lr_coef_mul=1, lr_new=None):
         if lr_new is not None:

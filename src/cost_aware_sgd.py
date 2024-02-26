@@ -6,11 +6,12 @@ import ray
 import os
 import seaborn as sns
 import time
-from config import config
+from configs.exp_config import config
 from line_reg_generator import DataGenerator
-from server import ParameterServer
-from worker import DataWorker
+# from server import ParameterServer
+# from worker import DataWorker
 
+from distributed_sys import ParameterServer, DataWorker
 
 sns.set(style="whitegrid", context="talk", font_scale=1.2, palette=sns.color_palette("bright"), color_codes=False)
 matplotlib.rcParams['pdf.fonttype'] = 42
@@ -33,9 +34,9 @@ def run(config, data_generator):
     iterations = config["iterations"]
     it_check = config["it_check"]
     batch_size = config["batch_size"]
-    max_seed = config.get("max_seed", 424242)  # Providing a default value if not in config
-    delay_adaptive = config.get("delay_adaptive", False)  # Providing a default value if not in config
-    lr_decay = config.get("lr_decay", 0)  # Providing a default value if not in config
+    max_seed = config.get("max_seed", 424242)  # Providing a default value if not in configs
+    delay_adaptive = config.get("delay_adaptive", False)  # Providing a default value if not in configs
+    lr_decay = config.get("lr_decay", 0)  # Providing a default value if not in configs
 
     # Initialize ParameterServer with corrected parameters
     ps = ParameterServer.remote(config["dim"], lr, asynchronous)
@@ -93,9 +94,11 @@ def run(config, data_generator):
 
         if it % it_check == 0 or (not asynchronous and it % (max(it_check // num_workers, 1)) == 0):
             # Evaluate the current model.
+            if not asynchronous:
+                print("Save at: ", it)
             x = ray.get(ps.get_x.remote())
-            current_loss = data_generator.evaluate(x)
-            losses.append(current_loss)
+            # current_loss = data_generator.evaluate(x)
+            # losses.append(current_loss)
             trace.append(x.copy())
             its.append(it)
             ts.append(time.perf_counter() - t0)
@@ -107,7 +110,7 @@ def run(config, data_generator):
         if asynchronous:
             delays.append(delay)
     ray.shutdown()
-    return its, ts, losses, delays
+    return np.asarray(its), np.asarray(ts), np.asarray([data_generator.evaluate(x) for x in trace]),  np.asarray(delays)
 
 
 def run_training(config):
@@ -140,7 +143,7 @@ def run_training(config):
     ray.shutdown()
 
     # Plot all results
-    plt.figure(figsize=(10, 6))
+    # plt.figure(figsize=(10, 6))
     # for its, adjusted_losses, label in results:
     #     plt.plot(its, adjusted_losses, label=label)
     for its, adjusted_losses, label in results:
