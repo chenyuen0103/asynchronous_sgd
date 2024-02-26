@@ -1,14 +1,12 @@
 import ray
 import os
 import numpy as np
-import matplotlib.pyplot as plt
 
-from line_reg_generator import DataGenerator
+from src.utils.line_reg_generator import DataGenerator
 from configs.exp_config import config
-from distributed_sys import DistributedSystem, ParameterServer, DataWorker
+from distributed_sys import DistributedSystem
 import pandas as pd
 import matplotlib.pyplot as plt
-import time
 
 
 def collect_results(results, output_dir='results', plot=True, save_to_csv=True):

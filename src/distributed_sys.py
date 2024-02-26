@@ -1,4 +1,4 @@
-from cost_model import simulate_communication_costs, simulate_computation_costs
+from src.utils.cost_model import simulate_communication_costs, simulate_computation_costs
 import ray
 # from server import ParameterServer
 import numpy as np

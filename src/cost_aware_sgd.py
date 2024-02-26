@@ -1,13 +1,11 @@
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-import psutil
 import ray
-import os
 import seaborn as sns
 import time
 from configs.exp_config import config
-from line_reg_generator import DataGenerator
+from src.utils.line_reg_generator import DataGenerator
 # from server import ParameterServer
 # from worker import DataWorker
 
