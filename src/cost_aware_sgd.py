@@ -5,7 +5,7 @@ import ray
 import seaborn as sns
 import time
 from configs.exp_config import config
-from src.utils.line_reg_generator import DataGenerator
+from src.utils.data_generator import LinReg_DataGenerator
 # from server import ParameterServer
 # from worker import DataWorker
 
@@ -116,7 +116,7 @@ def run_training(config):
     num_workers = config["num_workers"]  # Define num_workers here
 
     # Initialize DataGenerator
-    data_generator = DataGenerator(n_data=config["n_data"], dim=config["dim"], noise_scale=config["noise_scale"])
+    data_generator = LinReg_DataGenerator(n_data=config["n_data"], dim=config["dim"], noise_scale=config["noise_scale"])
 
     # Compute least squares solution
     A, b = data_generator.A, data_generator.b

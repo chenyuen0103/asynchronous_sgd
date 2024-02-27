@@ -1,4 +1,4 @@
-from src.utils.cost_model import simulate_communication_costs, simulate_computation_costs
+from src.utils.cost_model import simulate_communication_costs, simulate_computation_costs, naive_partitions
 import ray
 # from server import ParameterServer
 import numpy as np
@@ -25,7 +25,7 @@ class DistributedSystem:
                                                            **self.config['COST_DISTRIBUTION_PARAMS']['communication'])
         self.computation_costs = simulate_computation_costs(self.config['num_workers'], **self.config['COST_DISTRIBUTION_PARAMS']['computation'])
 
-        self.workers = [DataWorker.remote(self.data_generator, self.config["lr"], self.config["batch_size"],
+        self.workers = [DataWorker.remote(self.data_generator, self.config["lr"], self.config["batch_size"]//self.config["num_workers"],
                                           seeds_workers[i], self.computation_costs[i], self.communication_costs[i])
                         for i in range(self.config["num_workers"])]
 
@@ -47,9 +47,15 @@ class DistributedSystem:
         delay_adaptive = self.config.get("delay_adaptive", False)  # Providing a default value if not in configs
         lr_decay = self.config.get("lr_decay", 0)
         worker_updates = [0 for _ in range(self.config["num_workers"])]
+        self.cost_aware = self.config.get("cost_aware", False)
+        if self.cost_aware:
+            partition, _, _ = naive_partitions(self.computation_costs, self.communication_costs, batch_size)
+            partition = [int(p) for p in partition]
+            for i in range(num_workers):
+                self.workers[i].update_batch_size.remote(partition[i])
 
 
-
+        worker_batches = ray.get([worker.get_batch_size.remote() for worker in self.workers])
         x = self.ps.get_x.remote()
 
         if asynchronous:
@@ -71,7 +77,14 @@ class DistributedSystem:
         simulated_time = 0
         time_stamp = []
         grads_per_it = 1 if asynchronous else num_workers
-        for it in tqdm(range(iterations * (num_workers if asynchronous else 1))):
+        it = 0
+        x = ray.get(x)
+        grad_norm = np.linalg.norm(self.data_generator.grad_func(x),2)
+        # terminate condition is the norm of the gradient
+        while grad_norm > 1e-6 and it < iterations* (num_workers if asynchronous else 1):
+            # print(f"iteration {it} with norm {np.linalg.norm(self.data_generator.grad_func(x),2)}")
+            it += num_workers if asynchronous else 1
+            # for it in tqdm(range(iterations * (num_workers if asynchronous else 1))):
             n_grads = it * grads_per_it
             if asynchronous:
                 ready_gradient_list, _ = ray.wait(list(gradients))
@@ -95,24 +108,37 @@ class DistributedSystem:
                 ]
                 # Calculate update after all gradients are available.
                 x = self.ps.apply_gradients.remote(None, *gradients)
-                simulated_time += max(self.communication_costs[i] * batch_size + 2 * self.communication_costs[i] for i in range(num_workers))
+                time_per_worker = [self.computation_costs[i] * worker_batches[i] + 2 * self.communication_costs[i] for i in range(num_workers)]
+                max_time = max(time_per_worker)
+                simulated_time += max_time
+                if it % 100 == 0:
+                    print(f"{'Cost-aware Sync SGD' if self.cost_aware else 'Sync SGD'}")
+                    print("Batch per worker: ", worker_batches)
+                    print("Computation time for each worker: ", time_per_worker)
+                    print("Wait time: ", max_time)
+
+
+            if isinstance(x, ray.ObjectRef):
+                x = ray.get(self.ps.get_x.remote())
+            grad_norm = np.linalg.norm(self.data_generator.grad_func(x),2)
 
             if it % it_check == 0 or (not asynchronous and it % (max(it_check // num_workers, 1)) == 0):
                 # Evaluate the current model.
                 # if not asynchronous:
                 #     print("Save at: ", it)
-                x = ray.get(self.ps.get_x.remote())
+                # x = ray.get(self.ps.get_x.remote())
                 trace.append(x.copy())
                 its.append(it)
                 ts.append(time.perf_counter() - t0)
                 time_stamp.append(simulated_time)
-                # print(f"Iteration {it}, Loss: {current_loss}")
+                # print(f"Iteration {it}, Gradient Norm: {grad_norm}")
 
             lr_new = lr / (1 + lr_decay * n_grads)
             self.ps.update_lr.remote(lr_new=lr_new)
-            t = time.perf_counter()
             if asynchronous:
                 delays.append(delay)
+
+
         ray.shutdown()
         return np.asarray(its), np.asarray(ts), np.asarray([self.data_generator.evaluate(x) for x in trace]), np.asarray(
             delays), np.asarray(time_stamp)
@@ -147,12 +173,8 @@ class DataWorker(object):
             grad = self.data_generator.sgrad_func(x)
         else:
             grad = self.data_generator.batch_grad_func(x, self.batch_size)
-        # actualy time taken
-        dt = time.perf_counter() - t0
-
-        # Simulate computation cost
-        dt += max(0, self.comp_cost * self.batch_size - dt)
-        # time.sleep(max(0, self.comp_cost * self.batch_size - dt))
+        # time taken
+        # dt = time.perf_counter() - t0
         return grad
 
     def update_lr(self, lr_coef_mul=1, lr_new=None):
@@ -176,6 +198,9 @@ class DataWorker(object):
 
     def get_comm_cost(self):
         return self.comm_cost
+
+    def update_batch_size(self, new_batch_size):
+        self.batch_size = new_batch_size
 
 
 

@@ -1,8 +1,9 @@
 import ray
 import os
 import numpy as np
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
-from src.utils.line_reg_generator import DataGenerator
+from src.utils.data_generator import LinReg_DataGenerator, LogReg_DataGenerator
 from configs.exp_config import config
 from distributed_sys import DistributedSystem
 import pandas as pd
@@ -55,16 +56,20 @@ def collect_results(results, output_dir='results', plot=True, save_to_csv=True):
 
 def main():
     ray.init(ignore_reinit_error=True)
-    data_generator = DataGenerator(n_data=config["n_data"], dim=config["dim"], noise_scale=config["noise_scale"])
-    A, b = data_generator.A, data_generator.b
-    x_opt, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+    data_generator = LinReg_DataGenerator(n_data=config["n_data"], dim=config["dim"], noise_scale=config["noise_scale"])
+    # data_generator = LogReg_DataGenerator(n_data=config["n_data"], dim=config["dim"], noise_scale=config["noise_scale"])
+    x_opt, _, _, _ = np.linalg.lstsq(data_generator.A, data_generator.b, rcond=None)
     f_min = data_generator.evaluate(x_opt)
+
+
+
     distributed_system = DistributedSystem(config=config, data_generator=data_generator)
 
     experiments = [
         {"lr": 0.19, "asynchronous": False, "label": "Minibatch SGD"},
-        {"lr": 0.43, "asynchronous": True, "label": "Asynchronous SGD"},
-        {"lr": 0.43, "asynchronous": True, "delay_adaptive": True, "label": "Delay-Adaptive AsySGD"},
+        {"lr": 0.19, "asynchronous": False, "cost_aware": True, "label": "Cost-Aware Minibatch SGD"},
+        # {"lr": 0.43, "asynchronous": True, "label": "Asynchronous SGD"},
+        # {"lr": 0.43, "asynchronous": True, "delay_adaptive": True, "label": "Delay-Adaptive AsySGD"},
     ]
 
     results = []
@@ -75,7 +80,7 @@ def main():
         results.append((its, losses - f_min, time_stamp, exp["label"]))  # Store results for later plotting
 
     for its, adjusted_losses, time_stamp, label in results:
-        if label == 'Minibatch SGD':
+        if 'Minibatch SGD' in label:
             plt.plot(its * config['num_workers'], adjusted_losses, label=label)  # Assuming 1 gradient per iteration for Minibatch SGD
         else:
             plt.plot(its, adjusted_losses, label=label)  # Adjust for total gradients computed
