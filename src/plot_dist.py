@@ -7,11 +7,14 @@ from scipy.stats import norm, gamma, expon, lognorm, weibull_min
 normal_params = {'mean': 5, 'std': 1.5}
 gamma_params = {'shape': 2.5, 'scale': 1.2}
 exponential_params = {'scale': 2}
-lognormal_params = {'sigma': 0.7, 'scale': np.exp(1)}
+
+# underlying normal distribution with mean \mu and standard deviation \sigma
+# has log normal distribution with parameters 'sigma'= \sigma and 'scale' = exp(\mu)
+lognormal_params = {'sigma': 1, 'scale': np.exp(-1)}
 weibull_params = {'shape': 1.5, 'scale': 6}
 
 # X-axis values
-x = np.linspace(0, 20, 400)
+x = np.linspace(0, 5, 400)
 
 # Normal Distribution
 normal_pdf = norm.pdf(x, loc=normal_params['mean'], scale=normal_params['std'])

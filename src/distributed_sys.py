@@ -79,7 +79,7 @@ class DistributedSystem:
         grads_per_it = 1 if asynchronous else num_workers
         it = 0
         x = ray.get(x)
-        grad_norm = np.linalg.norm(self.data_generator.grad_func(x),2)
+        grad_norm = np.linalg.norm(self.data_generator.grad_func(x)[0],2)
         # terminate condition is the norm of the gradient
         while grad_norm > 1e-6 and it < iterations* (num_workers if asynchronous else 1):
             # print(f"iteration {it} with norm {np.linalg.norm(self.data_generator.grad_func(x),2)}")
@@ -103,11 +103,22 @@ class DistributedSystem:
                 worker_last_it[worker_num] = it
                 worker_updates[worker_num] += 1
             else:
-                gradients = [
-                    worker.compute_gradients.remote(x) for worker in self.workers
-                ]
+                # gradients = [
+                #     worker.compute_gradients.remote(x) for worker in self.workers
+                # ]
+
+                # Initialize lists to hold the separate returned values from each worker
+                sum_gradients_list = []
+                sum_grad_norm_list = []
+
+                # Use a loop or list comprehension to call the remote function and collect results
+                for worker in self.workers:
+                    sum_gradients, sum_grad_norm = ray.get(worker.compute_gradients.remote(x))
+                    sum_gradients_list.append(sum_gradients)
+                    sum_grad_norm_list.append(sum_grad_norm)
+
                 # Calculate update after all gradients are available.
-                x = self.ps.apply_gradients.remote(None, *gradients)
+                x = self.ps.apply_gradients.remote(None, *sum_gradients_list)
                 time_per_worker = [self.computation_costs[i] * worker_batches[i] + 2 * self.communication_costs[i] for i in range(num_workers)]
                 max_time = max(time_per_worker)
                 simulated_time += max_time
@@ -120,7 +131,8 @@ class DistributedSystem:
 
             if isinstance(x, ray.ObjectRef):
                 x = ray.get(self.ps.get_x.remote())
-            grad_norm = np.linalg.norm(self.data_generator.grad_func(x),2)
+
+            grad_norm = np.linalg.norm(self.data_generator.grad_func(x)[0],2)
 
             if it % it_check == 0 or (not asynchronous and it % (max(it_check // num_workers, 1)) == 0):
                 # Evaluate the current model.
@@ -166,16 +178,18 @@ class DataWorker(object):
         self.rng = np.random.default_rng(seed)
 
     def compute_gradients(self, x):
+        '''Compute the aggregated gradient of self.batch_size samples at parameter x,
+        as well as the aggregated norm of the gradients.'''
         t0 = time.perf_counter()
         if self.batch_size is None:
-            grad = self.data_generator.grad_func(x)
+            grad, norm_grad = self.data_generator.grad_func(x)
         elif self.batch_size == 1:
-            grad = self.data_generator.sgrad_func(x)
+            grad, norm_grad = self.data_generator.sgrad_func(x)
         else:
-            grad = self.data_generator.batch_grad_func(x, self.batch_size)
+            grad, norm_grad = self.data_generator.batch_grad_func(x, self.batch_size)
         # time taken
         # dt = time.perf_counter() - t0
-        return grad
+        return grad, norm_grad
 
     def update_lr(self, lr_coef_mul=1, lr_new=None):
         if lr_new is not None:

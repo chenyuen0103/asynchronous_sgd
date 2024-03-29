@@ -14,7 +14,12 @@ random.seed(0)
 np.random.seed(0)
 
 def generate_communication_cost(mu_m, sigma_m, n):
-    ''' cost of one-way communication between server and workers'''
+    ''' cost of one-way communication between server and workers
+    Args:
+    mu_m: mean of underlying normal distribution
+    sigma_m: standard deviation of underlying normal distribution
+    '''
+
     s = np.random.lognormal(mu_m, sigma_m, n)
     return s
 

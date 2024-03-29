@@ -48,10 +48,10 @@ def collect_results(results, output_dir='results', plot=True, save_to_csv=True):
         plt.ylabel(r'$F(\mathbf{x}) - F^*$')
         plt.title('Comparison of Training Methods')
         plt.legend()
-        plt.show()
         # Optionally, save the figure to a file
         fig_path = os.path.join(output_dir, 'training_methods_comparison.pdf')
         plt.savefig(fig_path, bbox_inches='tight')
+        plt.show()
         print(f"Figure saved to {fig_path}")
 
 def main():
@@ -72,9 +72,13 @@ def main():
         # {"lr": 0.43, "asynchronous": True, "delay_adaptive": True, "label": "Delay-Adaptive AsySGD"},
     ]
 
+
     results = []
     # Run experiments and collect results
     for exp in experiments:
+        if config["batch_size"] > config["n_data"]:
+            exp["batch_size"] = config["n_data"]
+
         updated_config = {**config, **exp}
         its, ts, losses, delays, time_stamp = distributed_system.run_experiment(config=updated_config) # Ensure 'run' can accept and use updated_config correctly
         results.append((its, losses - f_min, time_stamp, exp["label"]))  # Store results for later plotting
@@ -88,11 +92,11 @@ def main():
     plt.yscale('log')
     plt.xlabel('Number of gradients')
     plt.ylabel(r'$F(\mathbf{x}) - F^*$')
-    plt.title('Comparison of Training Methods')
+    plt.title(r'$F(\mathbf{x}) - F^*$ against Number of Gradients')
     plt.legend()
-    plt.show()
     # Optionally, save the figure to a file
-    # plt.savefig('training_methods_comparison.pdf', bbox_inches='tight')
+    plt.savefig('../data/num_grad_small_var.png')
+    plt.show()
 
 
     for its, adjusted_losses,  time_stamp, label in results:
@@ -104,8 +108,9 @@ def main():
     plt.yscale('log')
     plt.xlabel('Time (s)')
     plt.ylabel(r'$F(\mathbf{x}) - F^*$')
-    plt.title('Comparison of Training Methods')
+    plt.title(r'$F(\mathbf{x}) - F^*$ against Time')
     plt.legend()
+    plt.savefig('../data/time_small_var.png')
     plt.show()
     ray.shutdown()
     print("Done")
