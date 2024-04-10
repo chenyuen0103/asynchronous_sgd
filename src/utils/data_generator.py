@@ -100,10 +100,11 @@ class LogReg_DataGenerator:
         b_batch = self.b[idx]
         y_pred = self.sigmoid(A_batch @ x)
         grad = np.dot(A_batch.T, y_pred - b_batch) / batch_size
-        # grad = np.dot(A_batch.T, self.sigmoid(A_batch @ x) - b_batch) / batch_size
-
-        # grad_norm = np.sum((A_batch * ((self.sigmoid(A_batch @ x) - b_batch)[:, None]))**2) / batch_size
         grad_norm = np.sum((A_batch * ((y_pred - b_batch)[:, None]))**2) / batch_size
+
+        # Check the correctness of the gradient norm
+        # grad_norm0 = np.sum([((y_pred[i] - b_batch[i]) * A_batch[i]) ** 2 for i in range(batch_size)])/batch_size
+        # assert np.allclose(grad_norm0, grad_norm)
         return grad, grad_norm, idx
 
     def cost_func(self, y_pred, y):

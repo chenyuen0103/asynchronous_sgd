@@ -17,7 +17,7 @@ def gradient_diveristy(grad, grad_norm):
 def exp():
     # Initialize Data
     # linreg = LinReg_DataGenerator(n_data=10000, dim=400, noise_scale=1e-4)
-    linreg = LogReg_DataGenerator(n_data=10000, dim=2**9, noise_scale=1e-1)
+    linreg = LogReg_DataGenerator(n_data=1000, dim=2**9, noise_scale=1e-1)
     grad_func = linreg.grad_func
     sgrad_func = linreg.sgrad_func
     batch_grad_func = linreg.batch_grad_func
@@ -31,7 +31,6 @@ def exp():
     lr = 0.5
     lr_init = lr
     batch_size = 32
-    batch_size_init = batch_size
     x_opt, _, _, _ = np.linalg.lstsq(linreg.A, linreg.b, rcond=None)
     f_min = evaluate(x_opt)
     batch_size_init = batch_size
@@ -66,14 +65,16 @@ def exp():
     for i in range(num_iters):
         # num_grads_adaptive.append(num_grads_adaptive[-1] + batch_size)
         grad, grad_norm, _ = batch_grad_func(x, batch_size)
-        x = x - lr * grad
         grad_full, grad_norm_full = grad_func(x)
         gd_full = gradient_diveristy(grad_full, grad_norm_full)
+        x = x - lr * grad
+
         gds_full.append(gd_full/linreg.n_data)
         gd = gradient_diveristy(grad, grad_norm)
         # print(f"Iteration {i}, Loss: {evaluate(x)}, Gradient Diversity: {gd}"  )
         gds_adaptive_ideal.append(gd/batch_size)
-        batch_size = int(min(max(0.01 * np.round(gd_full), batch_size_init), linreg.n_data))
+        # gds_adaptive_ideal.append(gd_full/linreg.n_data)
+        batch_size = int(min(max(0.1 * np.round(gd_full), batch_size_init), linreg.n_data))
         # print(f"Iteration {i}, Loss: {evaluate(x)}, Gradient Diversity: {gd}")
         losses_adaptive_ideal.append(evaluate(x))
         accs_adaptive_ideal.append(accuracy(x))
@@ -99,7 +100,7 @@ def exp():
 
         # print(f"Iteration {i}, Loss: {evaluate(x)}, Gradient Diversity: {gd}")
         gds_adaptive.append(gd/batch_size)
-        batch_size = int(min(max(0.01 * np.round(gd), batch_size_init), linreg.n_data))
+        batch_size = int(min(max(0.1 * np.round(gd), batch_size_init), linreg.n_data))
         # print(f"Iteration {i}, Loss: {evaluate(x)}, Gradient Diversity: {gd}")
         losses_adaptive.append(evaluate(x))
         accs_adaptive.append(accuracy(x))
@@ -118,7 +119,7 @@ def exp():
     grad_sum = 0
     grad_norm_sum = 0
     k = 0
-    portion = 0.1
+    portion = 0.5
     batch_size = batch_size_init
     if len(gds_adaptive_proposed) < 1:
         gds_adaptive_proposed.append(0)
@@ -130,17 +131,27 @@ def exp():
         x = x - lr * grad
         k += 1
         # print(f"Iteration {i}, Loss: {evaluate(x)}, Gradient Diversity: {gd}")
-        if len(list(idx_seen)) >= portion * linreg.n_data:
+        if len(list(set(idx_seen))) >= portion * linreg.n_data:
             # grad_sum, grad_norm_sum, _ = batch_grad_func(x, linreg.n_data)
             gd = gradient_diveristy(grad_sum, grad_norm_sum)
             gds_adaptive_proposed.append(gd/batch_size)
             print(f"Updating batch size after {k} iterations of batch size {batch_size}")
-            batch_size = int(min(max(0.01 * np.round(gd*k), batch_size), linreg.n_data))
+            # print(f"number of data points seen: {len(list(idx_seen))}")
+            # print("Grad_norm_sum", grad_norm_sum)
+            print("Number of data points seen", len(list(set(idx_seen))))
+            print("Gradient Diversity", gd/batch_size)
+            grad_full, grad_norm_full,_ = batch_grad_func(x, len(list(set(idx_seen))))
+            # grad_full, grad_norm_full = grad_func(x)
+            gd_full = gradient_diveristy(grad_full, grad_norm_full)
+            print("Full Gradient Diversity", gd_full/linreg.n_data)
+
+
+            batch_size = int(min(max(0.1 * k * np.round(gd), batch_size), linreg.n_data))
             idx_seen = []
             grad_sum = 0
             grad_norm_sum = 0
             k = 0
-            portion *= 1.5
+            # portion = min(portion * 1.5, 1)
         else:
             gds_adaptive_proposed.append(gds_adaptive_proposed[-1])
 
@@ -158,17 +169,16 @@ def exp():
     losses_full = []
     accs_full = []
     num_grads_full = []
+    # gds_full = []
 
     for i in range(num_iters):
         grad, grad_norm = grad_func(x)
         x = x - lr * grad
         gd = gradient_diveristy(grad, grad_norm)
-        # print(f"Iteration {i}, Loss: {evaluate(x)}, Gradient Diversity: {gd}")
-        # print(f"Iteration {i}, Loss: {evaluate(x)}, Gradient Diversity: {gd}")
+        # gds_full.append(gd/linreg.n_data)
         losses_full.append(evaluate(x))
         accs_full.append(accuracy(x))
         num_grads_full.append((i+1) * linreg.n_data)
-        # gds_full.append(gd)
 
 
     # print("Number of gradients", num_grads[-1], num_grads_adaptive[-1])
@@ -204,10 +214,10 @@ def exp():
 
 
     # plt.plot(gds, label=f'Fixed Batch Size = {batch_size_init}')
-    plt.plot(gds_adaptive, label='Adaptive Batch Size')
+    # plt.plot(gds_adaptive, label='Adaptive Batch Size')
     plt.title('Progression of Gradient Diversity')
-    plt.plot(gds_full, label='Full Gradient')
-    plt.plot(gds_adaptive_ideal, label='Adaptive Batch Size (Ideal)')
+    plt.plot(gds_full, label='Full Gradient Diversity')
+    plt.plot(gds_adaptive_ideal, label='Batch Size Gradient Diversity (Ideal)')
     plt.plot(gds_adaptive_proposed, label='Proposed Adaptive Batch Size')
     # plt.plot(gds_schedule, label='Batch Size Schedule')
     plt.xlabel('Iteration')
@@ -216,7 +226,7 @@ def exp():
     # plt.savefig('../data/gradient_diversity.png')
     plt.show()
 
-    plt.plot(batch_size_list, label='Adaptive Batch Size')
+    # plt.plot(batch_size_list, label='Adaptive Batch Size')
     plt.plot(batch_size_list_ideal, label='Adaptive Batch Size (Ideal)')
     plt.plot(batch_size_list_proposed, label='Proposed Adaptive Batch Size')
     # plt.plot(batch_size_list_schedule, label='Batch Size Schedule')
