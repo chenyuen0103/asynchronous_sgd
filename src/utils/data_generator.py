@@ -79,52 +79,63 @@ class LogReg_DataGenerator:
         """Sigmoid function."""
         return 1 / (1 + np.exp(-x))
 
-    def grad_func(self, x):
-        """Compute the full gradient of the logistic loss analytically."""
-        y_pred = self.sigmoid(self.A @ x)
-        grad = (y_pred - self.b) @ self.A / self.n_data
-        grad_norm = np.sum((self.A * ((self.sigmoid(self.A @ x) - self.b)[:, None]))**2) / self.n_data
+    def get_subset(self, indices):
+        """Return subsets of A and b based on provided indices."""
+        return self.A[indices], self.b[indices]
+
+    def grad_func(self, x, indices):
+        """Compute the full gradient using only the specified indices."""
+        A_subset, b_subset = self.get_subset(indices)
+        y_pred = self.sigmoid(A_subset @ x)
+        grad = (y_pred - b_subset) @ A_subset / len(indices)
+        grad_norm = np.sum((A_subset * ((self.sigmoid(A_subset @ x) - b_subset)[:, None]))**2) / len(indices)
         return grad, grad_norm
 
-    def sgrad_func(self, x):
-        """Compute a stochastic gradient."""
-        i = self.rng.integers(self.n_data)
-        grad = np.dot(self.A[i], self.sigmoid(self.A[i] @ x) - self.y[i])
-        grad_norm = np.sum((self.A[i] * ((self.A[i] @ x - self.y[i])[:, None]))**2)
+    def evaluate(self, x, indices):
+        """Evaluate the logistic loss using binary cross-entropy on a subset."""
+        A_subset, b_subset = self.get_subset(indices)
+        y_pred = self.sigmoid(A_subset @ x)
+        cost = self.cost_func(y_pred, b_subset)
+        return cost
+
+    def accuracy(self, x, indices):
+        """Evaluate the accuracy on a subset."""
+        A_subset, b_subset = self.get_subset(indices)
+        y_pred = self.sigmoid(A_subset @ x)
+        return np.mean((y_pred > 0.5) == b_subset)
+
+    def sgrad_func(self, x, indices=None):
+        """Compute a stochastic gradient using a random example from provided indices."""
+        if indices is None:
+            indices = range(self.n_data)
+        i = self.rng.choice(indices)  # Choose one index from the provided subset
+        A_i = self.A[i]
+        b_i = self.b[i]
+        y_pred_i = self.sigmoid(A_i @ x)
+        grad = np.dot(A_i, y_pred_i - b_i)
+        grad_norm = np.sum((A_i * (y_pred_i - b_i)) ** 2)
         return grad, grad_norm
 
-    def batch_grad_func(self, x, batch_size):
-        """Compute a mini-batch gradient."""
-        idx = self.rng.choice(self.n_data, size=batch_size, replace=False)
-        A_batch = self.A[idx]
-        b_batch = self.b[idx]
+    def batch_grad_func(self, x, batch_size, indices=None):
+        """Compute a mini-batch gradient from the provided indices subset or the whole dataset."""
+        if indices is None:
+            indices = range(self.n_data)
+        batch_idx = self.rng.choice(indices, size=batch_size, replace=False)  # Sample batch indices
+        A_batch = self.A[batch_idx]
+        b_batch = self.b[batch_idx]
         y_pred = self.sigmoid(A_batch @ x)
         grad = np.dot(A_batch.T, y_pred - b_batch) / batch_size
-        grad_norm = np.sum((A_batch * ((y_pred - b_batch)[:, None]))**2) / batch_size
+        grad_norm = np.sum((A_batch * ((y_pred - b_batch)[:, None])) ** 2) / batch_size
+        return grad, grad_norm, batch_idx
 
-        # Check the correctness of the gradient norm
-        # grad_norm0 = np.sum([((y_pred[i] - b_batch[i]) * A_batch[i]) ** 2 for i in range(batch_size)])/batch_size
-        # assert np.allclose(grad_norm0, grad_norm)
-        return grad, grad_norm, idx
 
     def cost_func(self, y_pred, y):
         """Compute the logistic loss using binary cross-entropy."""
-        cost = -np.sum(y * np.log(y_pred) + (1 - y) * np.log(1 - y_pred))/self.n_data
+        epsilon = 1e-10
+        y_pred_clipped = np.clip(y_pred, epsilon, 1 - epsilon)
+        cost = -np.sum(y * np.log(y_pred_clipped) + (1 - y) * np.log(1 - y_pred_clipped))/self.n_data
         return cost
 
-    def evaluate(self, x):
-        """Evaluate the logistic loss using binary cross-entropy."""
-        assert len(x) == self.dim
-        y_pred = self.sigmoid(self.A @ x)
-        loss = self.cost_func(y_pred, self.b)
-        return loss
-
-    def accuracy(self, x):
-        """Evaluate the accuracy of the model."""
-        assert len(x) == self.dim
-        y_pred = self.sigmoid(self.A @ x)
-        acc = np.mean((y_pred > 0.5) == self.b)
-        return acc
 
 
 class Sine_DataGenerator:

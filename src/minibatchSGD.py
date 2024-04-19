@@ -5,333 +5,401 @@ import matplotlib.pyplot as plt
 
 # Run minibatch SGD
 
+class PerformanceMetrics:
+    def __init__(self):
+        self.lrs = []
+        self.train_losses = []
+        self.train_accs = []
+        self.val_losses = []
+        self.val_accs = []
+        self.gds = []
+        self.num_grads = []
+        self.batch_sizes = []
+
+    def update(self, lr, train_loss, train_acc, val_loss, val_acc, gd, num_grad, batch_size = None):
+        self.lrs.append(lr)
+        self.train_losses.append(train_loss)
+        self.train_accs.append(train_acc)
+        self.val_losses.append(val_loss)
+        self.val_accs.append(val_acc)
+        self.gds.append(gd)
+        self.num_grads.append(num_grad)
+        if batch_size is not None:
+            self.batch_sizes.append(batch_size)
+
+    def get_results(self):
+        return {
+            "lrs": self.lrs,
+            "train_losses": self.train_losses,
+            "train_accs": self.train_accs,
+            "val_losses": self.val_losses,
+            "val_accs": self.val_accs,
+            "gds": self.gds,
+            "num_grads": self.num_grads,
+            "batch_sizes": self.batch_sizes
+        }
 
 
-def gradient_diveristy(grad, grad_norm):
-    gd = grad_norm / np.linalg.norm(grad)**2
+def gradient_diversity(grad, grad_norm):
+    gd = grad_norm / np.linalg.norm(grad)**2 + 1e-8
     if gd < 0:
         print("Gradient Diversity is negative")
     return gd
 
 
-def exp():
-    # Initialize Data
-    # linreg = LinReg_DataGenerator(n_data=10000, dim=400, noise_scale=1e-4)
-    linreg = LogReg_DataGenerator(n_data=1000, dim=2**9, noise_scale=1e-1)
-    grad_func = linreg.grad_func
-    sgrad_func = linreg.sgrad_func
-    batch_grad_func = linreg.batch_grad_func
-    evaluate = linreg.evaluate
-    accuracy = linreg.accuracy
-    num_iters = 1000
-
-    x = linreg.rng.normal(size=linreg.dim)
-    x_init = x.copy()
-
-    lr = 0.5
-    lr_init = lr
-    batch_size = 32
-    x_opt, _, _, _ = np.linalg.lstsq(linreg.A, linreg.b, rcond=None)
-    f_min = evaluate(x_opt)
-    batch_size_init = batch_size
-    losses = []
-    accs = []
-    gds = []
-    num_grads = []
-
-    # Fixed batch size
-    x = x_init
+def horvath_grad(data_generator, train_indices,val_indices, num_iters, batch_size, eta, x):
+    num_data = len(train_indices)
+    metrics = PerformanceMetrics()
+    gamma = 1
     for i in range(num_iters):
-        grad, grad_norm, _ = batch_grad_func(x, batch_size)
-        num_grads.append((i+1) * batch_size)
-        gd = gradient_diveristy(grad, grad_norm)
-        gds.append(gd/batch_size)
-        x = x - lr * grad
-        # batch_size = max(int(np.round(gd)),512)
-        # print(f"Iteration {i}, Loss: {evaluate(x)}, Gradient Diversity: {gd}")
-        losses.append(evaluate(x))
-        accs.append(accuracy(x))
+        grad, grad_norm, _ = data_generator.batch_grad_func(x, batch_size)
+        gd = gradient_diversity(grad, grad_norm)
+        gamma_max = (2 ** (batch_size/ num_data)) * gamma
+        gamma = min(gamma_max, gd)
+        x = x - eta * gamma * grad
+
+        # Update the metrics object
+        train_loss = data_generator.evaluate(x, train_indices)
+        train_acc = data_generator.accuracy(x, train_indices)
+        val_loss = data_generator.evaluate(x, val_indices)
+        val_acc = data_generator.accuracy(x, val_indices)
+        metrics.update(eta * gamma, train_loss, train_acc, val_loss, val_acc, gd / batch_size, (i + 1) * batch_size, batch_size)
+
+        # if i % 100 == 0:
+        #     print(f"Iteration {i}, Gamma_max: {gamma_max}, gd: {gd}, Gamma: {gamma}",'lr:', eta * gamma)
+    return x, metrics.get_results()
 
 
-    # Adaptive batch size (ideal)
-    x = x_init
-    losses_adaptive_ideal = []
-    gds_adaptive_ideal = []
-    gds_full = []
-    batch_size_list_ideal = []
-    num_grads_adaptive_ideal = []
-    accs_adaptive_ideal = []
-    batch_size = batch_size_init
+def fixed_batch_size(data_generator, train_indices, val_indices, num_iters, batch_size, lr, x):
+    metrics = PerformanceMetrics()  # Instantiate the metrics class
     for i in range(num_iters):
-        # num_grads_adaptive.append(num_grads_adaptive[-1] + batch_size)
-        grad, grad_norm, _ = batch_grad_func(x, batch_size)
-        grad_full, grad_norm_full = grad_func(x)
-        gd_full = gradient_diveristy(grad_full, grad_norm_full)
+        grad, grad_norm, _ = data_generator.batch_grad_func(x, batch_size, train_indices)
+        gd = gradient_diversity(grad, grad_norm) / batch_size  # Assume gradient_diversity exists
         x = x - lr * grad
 
-        gds_full.append(gd_full/linreg.n_data)
-        gd = gradient_diveristy(grad, grad_norm)
-        # print(f"Iteration {i}, Loss: {evaluate(x)}, Gradient Diversity: {gd}"  )
-        gds_adaptive_ideal.append(gd/batch_size)
-        # gds_adaptive_ideal.append(gd_full/linreg.n_data)
-        batch_size = int(min(max(0.1 * np.round(gd_full), batch_size_init), linreg.n_data))
-        # print(f"Iteration {i}, Loss: {evaluate(x)}, Gradient Diversity: {gd}")
-        losses_adaptive_ideal.append(evaluate(x))
-        accs_adaptive_ideal.append(accuracy(x))
-        batch_size_list_ideal.append(batch_size)
-        num_grads_adaptive_ideal.append(sum(batch_size_list_ideal))
-        if i % 999 == 0 :
-            print(f"Iteration {i}, Loss: {evaluate(x)}, Gradient Diversity: {gd_full}")
+        # Update the metrics object
+        train_loss = data_generator.evaluate(x, train_indices)
+        train_acc = data_generator.accuracy(x, train_indices)
+        val_loss = data_generator.evaluate(x, val_indices)
+        val_acc = data_generator.accuracy(x, val_indices)
+        metrics.update(lr, train_loss, train_acc, val_loss, val_acc, gd, (i + 1) * batch_size)
+
+    # Return the optimized parameters and all collected metrics
+    return x, metrics.get_results()
 
 
-    # Adaptive batch size
-    x = x_init
-    losses_adaptive = []
-    gds_adaptive = []
-    batch_size_list = []
-    num_grads_adaptive = []
-    accs_adaptive = []
-    batch_size = batch_size_init
-    for i in range(num_iters):
-        # num_grads_adaptive.append(num_grads_adaptive[-1] + batch_size)
-        grad, grad_norm, _ = batch_grad_func(x, batch_size)
-        x = x - lr * grad
-        gd = gradient_diveristy(grad, grad_norm)
-
-        # print(f"Iteration {i}, Loss: {evaluate(x)}, Gradient Diversity: {gd}")
-        gds_adaptive.append(gd/batch_size)
-        batch_size = int(min(max(0.1 * np.round(gd), batch_size_init), linreg.n_data))
-        # print(f"Iteration {i}, Loss: {evaluate(x)}, Gradient Diversity: {gd}")
-        losses_adaptive.append(evaluate(x))
-        accs_adaptive.append(accuracy(x))
-        batch_size_list.append(batch_size)
-        num_grads_adaptive.append(sum(batch_size_list))
-
-
-    # Proposed adaptive batch size
-    x = x_init
-    losses_adaptive_proposed = []
-    gds_adaptive_proposed = []
-    batch_size_list_proposed = []
-    num_grads_adaptive_proposed = []
-    accs_adaptive_proposed = []
+def proposed(data_generator, train_indices, val_indices, num_iters, batch_size, lr, x, sweep_portion=0.5):
+    num_data = len(train_indices)
+    metrics = PerformanceMetrics()
     idx_seen = []
     grad_sum = 0
     grad_norm_sum = 0
     k = 0
-    portion = 0.5
-    batch_size = batch_size_init
-    if len(gds_adaptive_proposed) < 1:
-        gds_adaptive_proposed.append(0)
+    batch_size_init = batch_size
+    lr_init = lr
     for i in range(num_iters):
-        grad, grad_norm, idx = batch_grad_func(x, batch_size)
+        grad, grad_norm, idx = data_generator.batch_grad_func(x, batch_size, train_indices)
         idx_seen.extend(idx)
         grad_sum += grad
         grad_norm_sum += grad_norm
         x = x - lr * grad
         k += 1
+        # if i % 100 == 0:
+        #     print(
+        #         f"Iteration {i}, Gradient Diversity: {gd}, Batch Size: {batch_size}, gamma_max: {gamma_max}, gamma: {gamma}, lr: {lr}")
         # print(f"Iteration {i}, Loss: {evaluate(x)}, Gradient Diversity: {gd}")
-        if len(list(set(idx_seen))) >= portion * linreg.n_data:
-            # grad_sum, grad_norm_sum, _ = batch_grad_func(x, linreg.n_data)
-            gd = gradient_diveristy(grad_sum, grad_norm_sum)
-            gds_adaptive_proposed.append(gd/batch_size)
-            print(f"Updating batch size after {k} iterations of batch size {batch_size}")
-            # print(f"number of data points seen: {len(list(idx_seen))}")
-            # print("Grad_norm_sum", grad_norm_sum)
-            print("Number of data points seen", len(list(set(idx_seen))))
-            print("Gradient Diversity", gd/batch_size)
-            grad_full, grad_norm_full,_ = batch_grad_func(x, len(list(set(idx_seen))))
-            # grad_full, grad_norm_full = grad_func(x)
-            gd_full = gradient_diveristy(grad_full, grad_norm_full)
-            print("Full Gradient Diversity", gd_full/linreg.n_data)
-
-
-            batch_size = int(min(max(0.1 * k * np.round(gd), batch_size), linreg.n_data))
+        if len(list(set(idx_seen))) >= sweep_portion * num_data:
+            gd = gradient_diversity(grad_sum, grad_norm_sum)
+            batch_size = int(min(max(0.1 * k * np.round(gd), batch_size), num_data))
+            lr = lr_init * (batch_size * 10 / batch_size_init)
             idx_seen = []
             grad_sum = 0
             grad_norm_sum = 0
             k = 0
+
+            # lr = lr_schedule(i, lr_init)
             # portion = min(portion * 1.5, 1)
         else:
-            gds_adaptive_proposed.append(gds_adaptive_proposed[-1])
+            if len(metrics.gds) > 0:
+                gd = metrics.gds[-1]
+            else:
+                gd = 0
 
         # print(f"Iteration {i}, Loss: {evaluate(x)}, Gradient Diversity: {gd}")
+        # Evaluate metrics
+        train_loss = data_generator.evaluate(x, train_indices)
+        train_acc = data_generator.accuracy(x, train_indices)
+        val_loss = data_generator.evaluate(x, val_indices)
+        val_acc = data_generator.accuracy(x, val_indices)
+        metrics.update(lr, train_loss, train_acc, val_loss, val_acc, gd, sum(metrics.batch_sizes) + batch_size, batch_size)
 
-        losses_adaptive_proposed.append(evaluate(x))
-        accs_adaptive_proposed.append(accuracy(x))
-        batch_size_list_proposed.append(batch_size)
-        num_grads_adaptive_proposed.append(sum(batch_size_list_proposed))
-        # if i % 999 == 0 :
-        #     print(f"Iteration {i}, Loss: {evaluate(x)}, Gradient Diversity: {gd}")
 
-    # Full Gradient
-    x = x_init
-    losses_full = []
-    accs_full = []
-    num_grads_full = []
-    # gds_full = []
+    return x, metrics.get_results()
+
+
+def full_grad(data_generator, train_indices, val_indices, num_iters, lr, x):
+    metrics = PerformanceMetrics()  # Instantiate the metrics class
 
     for i in range(num_iters):
-        grad, grad_norm = grad_func(x)
+        # Compute full gradient based on training data
+        grad, grad_norm = data_generator.grad_func(x, train_indices)
+        gd = gradient_diversity(grad, grad_norm) / len(train_indices)  # Assume gradient_diversity exists
+
+        # Update model parameters
         x = x - lr * grad
-        gd = gradient_diveristy(grad, grad_norm)
-        # gds_full.append(gd/linreg.n_data)
-        losses_full.append(evaluate(x))
-        accs_full.append(accuracy(x))
-        num_grads_full.append((i+1) * linreg.n_data)
+
+        # Calculate metrics for both training and validation sets
+        train_loss = data_generator.evaluate(x, train_indices)
+        train_acc = data_generator.accuracy(x, train_indices)
+        val_loss = data_generator.evaluate(x, val_indices)
+        val_acc = data_generator.accuracy(x, val_indices)
+
+        # Update metrics object
+        metrics.update(lr, train_loss, train_acc, val_loss, val_acc, gd, (i + 1) * len(train_indices), len(train_indices))
+
+    # Return the optimized parameters and all collected metrics
+    return x, metrics.get_results()
 
 
-    # print("Number of gradients", num_grads[-1], num_grads_adaptive[-1])
-    print("Optimal Loss (log scale)", np.log(f_min))
-    plt.plot(losses, label=f'Fixed Batch Size = {batch_size_init}')
-    plt.plot(losses_adaptive_ideal, label='Adaptive Batch Size (Ideal)')
-    plt.plot(losses_adaptive, label='Adaptive Batch Size')
-    plt.plot(losses_adaptive_proposed, label='Proposed Adaptive Batch Size')
-    # plt.plot(losses_schedule, label='Batch Size Schedule (* 1/0.75 every 100 iterations)')
-    # plt.plot(losses_adaptive_avg, label=f'Adaptive Batch Size (Average = {avg_batch_size})')
-    plt.plot(losses_full, label='Full Gradient')
+
+
+def adam(data_generator, train_indices, val_indices, num_iters, batch_size, lr, x, beta1=0.9, beta2=0.999, epsilon=1e-8):
+    metrics = PerformanceMetrics()  # Instantiate the metrics class
+
+    m = np.zeros_like(x)  # Initialize first moment vector
+    v = np.zeros_like(x)  # Initialize second moment vector
+
+    for i in range(num_iters):
+        grad, grad_norm, _  = data_generator.batch_grad_func(x, batch_size, train_indices)
+
+        # Update biased first moment estimate
+        m = beta1 * m + (1 - beta1) * grad
+        # Update biased second moment estimate
+        v = beta2 * v + (1 - beta2) * (grad ** 2)
+
+        # Compute bias-corrected first moment estimate
+        m_hat = m / (1 - beta1 ** (i + 1))
+        # Compute bias-corrected second moment estimate
+        v_hat = v / (1 - beta2 ** (i + 1))
+
+        # Update parameters
+        x = x - lr * m_hat / (np.sqrt(v_hat) + epsilon)
+
+        # Evaluate metrics
+        train_loss = data_generator.evaluate(x, train_indices)
+        train_acc = data_generator.accuracy(x, train_indices)
+        val_loss = data_generator.evaluate(x, val_indices)
+        val_acc = data_generator.accuracy(x, val_indices)
+        metrics.update(lr * np.linalg.norm(1 / (np.sqrt(v_hat) + epsilon)), train_loss, train_acc, val_loss, val_acc, 0, (i + 1) * batch_size)
+
+    # Return the optimized parameters and all collected metrics
+    return x, metrics.get_results()
+
+
+def lr_schedule(epoch, lr_init, alpha = 0.001):
+    if epoch < 10:
+        return lr_init
+    else:
+        return lr_init * (np.exp(- alpha * epoch))
+
+
+
+def exp(num_trials=5, n_data=20000, dim=2**9, noise_scale=1e-1, num_iters=15, batch_size=1024, lr_init=1):
+    # Define ratios for train, validation, and test sets
+    train_ratio, val_ratio, test_ratio = 0.7, 0.15, 0.15
+    results = {
+        'horvath': [],
+        'full': [],
+        'batch': [],
+        'proposed': [],
+        'adam': []
+    }
+
+    for _ in range(num_trials):
+        logreg = LogReg_DataGenerator(n_data=n_data, dim=dim, noise_scale=noise_scale)
+
+        # Split data into train, validation, and test sets
+        indices = np.arange(n_data)
+        logreg.rng.shuffle(indices)
+        train_size = int(n_data * train_ratio)
+        val_size = int(n_data * val_ratio)
+        train_indices = indices[:train_size]
+        val_indices = indices[train_size:train_size + val_size]
+        test_indices = indices[train_size + val_size:]
+
+        # Initialize parameters for all methods
+        x_init = logreg.rng.normal(size=logreg.dim)
+
+        # Run a single trial
+        method_results = run_single_trial(logreg, train_indices, val_indices, test_indices, num_iters, batch_size, lr_init, x_init)
+        for method, data in method_results.items():
+            results[method].append(data)
+
+    # Calculate statistics
+    stats = {method: calculate_stats(data) for method, data in results.items()}
+    return stats
+
+def calculate_stats(data):
+    # Compute mean, standard deviation of losses, accuracies, and learning rates
+    stats = {
+        'train_loss_mean': np.mean([trial[1]['train_losses'] for trial in data], axis=0),
+        'train_loss_std': np.std([trial[1]['train_losses'] for trial in data], axis=0),
+        'val_loss_mean': np.mean([trial[1]['val_losses'] for trial in data], axis=0),
+        'val_loss_std': np.std([trial[1]['val_losses'] for trial in data], axis=0),
+        'train_acc_mean': np.mean([trial[1]['train_accs'] for trial in data], axis=0),
+        'train_acc_std': np.std([trial[1]['train_accs'] for trial in data], axis=0),
+        'val_acc_mean': np.mean([trial[1]['val_accs'] for trial in data], axis=0),
+        'val_acc_std': np.std([trial[1]['val_accs'] for trial in data], axis=0),
+        'lr_mean': np.mean([trial[1]['lrs'] for trial in data], axis=0),
+        'lr_std': np.std([trial[1]['lrs'] for trial in data], axis=0),
+        'num_grads_mean': np.mean([trial[1]['num_grads'] for trial in data], axis=0)
+    }
+    return stats
+
+
+def run_single_trial(logreg, train_indices, val_indices, test_indices, num_iters, batch_size, lr_init, x_init):
+    # Dictionary mapping method names to function references and their specific arguments
+    methods = {
+        'adam': (adam, {'data_generator': logreg,'train_indices': train_indices, 'val_indices': val_indices, 'num_iters': num_iters, 'batch_size': batch_size, 'lr': lr_init, 'x': np.copy(x_init)}),
+        'horvath': (horvath_grad, {'data_generator': logreg,'train_indices': train_indices, 'val_indices': val_indices, 'num_iters': num_iters, 'batch_size': batch_size, 'eta': lr_init, 'x': np.copy(x_init)}),
+        'full': (full_grad, {'data_generator': logreg,'train_indices': train_indices, 'val_indices': val_indices, 'num_iters': num_iters, 'lr': lr_init, 'x': np.copy(x_init)}),
+        'batch': (fixed_batch_size, {'data_generator': logreg,'train_indices': train_indices, 'val_indices': val_indices, 'num_iters': num_iters, 'batch_size': batch_size, 'lr': lr_init, 'x': np.copy(x_init)}),
+        'proposed': (proposed, {'data_generator': logreg,'train_indices': train_indices, 'val_indices': val_indices, 'num_iters': num_iters, 'batch_size': batch_size, 'lr': lr_init, 'x': np.copy(x_init), 'sweep_portion': 0.5})
+    }
+    results = {}
+    for method_name, (method_func, kwargs) in methods.items():
+        results[method_name] = method_func(**kwargs)
+    return results
+
+def plot_single(method_dict, save = False, save_path = None):
+
+    for method in method_dict:
+        x, lrs, losses, accs, gds, num_grads = method_dict[method]
+        plt.plot(losses, label=method)
     plt.yscale('log')
     plt.xlabel('Iteration')
     plt.ylabel('Loss')
     plt.legend()
-    # plt.savefig('../data/losses_800_1000.png')
     plt.show()
 
-    # plot against number of gradients
-    plt.plot(num_grads, losses, label='Fixed Batch Size')
-    plt.plot(num_grads_adaptive_ideal, losses_adaptive_ideal, label='Adaptive Batch Size (Ideal)')
-    plt.plot(num_grads_adaptive, losses_adaptive, label='Adaptive Batch Size')
-    plt.plot(num_grads_adaptive_proposed, losses_adaptive_proposed, label='Proposed Adaptive Batch Size')
-    # plt.plot(num_grads_schedule, losses_schedule, label='Batch Size Schedule')
-    # plt.plot(num_grads_adaptive_avg, losses_adaptive_avg, label=f'Adaptive Batch Size (Average = {avg_batch_size})')
-    # plt.plot(num_grads_full, losses_full, label='Full Gradient')
-    plt.yscale('log')
-    plt.xlabel('Number of Gradients')
-    plt.ylabel('Loss')
-    plt.xlim(0, max(num_grads_adaptive))
+    for method in method_dict:
+        x, lrs, losses, accs, gds, num_grads = method_dict[method]
+        plt.plot(accs, label=method)
+    plt.xlabel('Iteration')
+    plt.ylabel('Accuracy')
     plt.legend()
     plt.show()
 
-
-    # plt.plot(gds, label=f'Fixed Batch Size = {batch_size_init}')
-    # plt.plot(gds_adaptive, label='Adaptive Batch Size')
-    plt.title('Progression of Gradient Diversity')
-    plt.plot(gds_full, label='Full Gradient Diversity')
-    plt.plot(gds_adaptive_ideal, label='Batch Size Gradient Diversity (Ideal)')
-    plt.plot(gds_adaptive_proposed, label='Proposed Adaptive Batch Size')
-    # plt.plot(gds_schedule, label='Batch Size Schedule')
+    for method in method_dict:
+        x, lrs, losses, accs, gds, num_grads = method_dict[method]
+        plt.plot(gds, label=method)
     plt.xlabel('Iteration')
     plt.ylabel('Gradient Diversity')
     plt.legend()
-    # plt.savefig('../data/gradient_diversity.png')
     plt.show()
 
-    # plt.plot(batch_size_list, label='Adaptive Batch Size')
-    plt.plot(batch_size_list_ideal, label='Adaptive Batch Size (Ideal)')
-    plt.plot(batch_size_list_proposed, label='Proposed Adaptive Batch Size')
-    # plt.plot(batch_size_list_schedule, label='Batch Size Schedule')
-    plt.xlabel('Iteration')
-    plt.ylabel('Batch Size')
-    plt.title(f'Adaptive Batch Size (Initial Batch Size = {batch_size_init})')
-    # plt.savefig('../data/adaptive_batch_size.png')
+    for method in method_dict:
+        x, lrs, losses, accs, gds, num_grads = method_dict[method]
+        plt.plot(num_grads, losses, label=method)
+    plt.yscale('log')
+    plt.xlabel('Number of Gradients')
+    plt.ylabel('Loss')
     plt.legend()
     plt.show()
+
+    for method in method_dict:
+        x, lrs, losses, accs, gds, num_grads = method_dict[method]
+        plt.plot(num_grads, accs, label=method)
+    plt.xlabel('Number of Gradients')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.show()
+
+    for method in method_dict:
+        x, lrs, losses, accs, gds, num_grads = method_dict[method]
+        plt.plot(lrs, label=method)
+    plt.xlabel('Iteration')
+    plt.ylabel('Learning Rate')
+    plt.legend()
+    plt.show()
+
+    if save:
+        plt.savefig(save_path)
+
+
+def plot_exp(stats, save=False, save_path=None):
+    # Plotting training and validation losses
+    for plot_type in ['train', 'val']:
+        for method, data in stats.items():
+            iterations = range(len(data[f'{plot_type}_loss_mean']))
+            plt.plot(iterations, data[f'{plot_type}_loss_mean'], label=f'{method} {plot_type.capitalize()} Loss')
+            plt.fill_between(iterations,
+                             data[f'{plot_type}_loss_mean'] - data[f'{plot_type}_loss_std'],
+                             data[f'{plot_type}_loss_mean'] + data[f'{plot_type}_loss_std'],
+                             alpha=0.5)
+        plt.xlabel('Iteration')
+        plt.ylabel('Loss')
+        plt.title(f'{plot_type.capitalize()} Loss per Iteration')
+        plt.legend()
+        plt.show()
+
+    # Plotting training and validation accuracies
+    for plot_type in ['train', 'val']:
+        for method, data in stats.items():
+            iterations = range(len(data[f'{plot_type}_acc_mean']))
+            plt.plot(iterations, data[f'{plot_type}_acc_mean'], label=f'{method} {plot_type.capitalize()} Accuracy')
+            plt.fill_between(iterations,
+                             data[f'{plot_type}_acc_mean'] - data[f'{plot_type}_acc_std'],
+                             data[f'{plot_type}_acc_mean'] + data[f'{plot_type}_acc_std'],
+                             alpha=0.2)  # Semi-transparent shaded area
+        plt.xlabel('Iteration')
+        plt.ylabel('Accuracy')
+        plt.title(f'{plot_type.capitalize()} Accuracy per Iteration')
+        plt.legend()
+        plt.show()
+
+    # If saving the plots is required
+    if save and save_path is not None:
+        for fig_type in ['loss', 'acc']:
+            for plot_type in ['train', 'val']:
+                plt.figure()
+                for method, data in stats.items():
+                    iterations = range(len(data[f'{plot_type}_{fig_type}_mean']))
+                    plt.plot(iterations, data[f'{plot_type}_{fig_type}_mean'], label=f'{method} {plot_type.capitalize()} {fig_type.capitalize()}')
+                    plt.fill_between(iterations,
+                                     data[f'{plot_type}_{fig_type}_mean'] - data[f'{plot_type}_{fig_type}_std'],
+                                     data[f'{plot_type}_{fig_type}_mean'] + data[f'{plot_type}_{fig_type}_std'],
+                                     alpha=0.5 if fig_type == 'loss' else 0.2)
+                plt.xlabel('Iteration')
+                plt.ylabel(fig_type.capitalize())
+                plt.title(f'{plot_type.capitalize()} {fig_type.capitalize()} per Iteration')
+                plt.legend()
+                plt.savefig(f'{save_path}/{plot_type}_{fig_type}.png')
+                plt.close()
+
+
+def main():
+    stats = exp(num_trials=3)
+    plot_exp(stats)
+
+
 
 
 
 
 def sweep_batch_size():
-    # Initialize your LinReg_DataGenerator with a specific dataset
-    linreg = LogReg_DataGenerator(n_data=10000, dim=400, noise_scale=1e-5)
-    x_init = linreg.rng.normal(size=linreg.dim)
-    x_opt, _, _, _ = np.linalg.lstsq(linreg.A, linreg.b, rcond=None)
-    f_min = linreg.evaluate(x_opt)
-    evaluate = linreg.evaluate
-    accuracy = linreg.accuracy
+    # Initialize your logreg_DataGenerator with a specific dataset
+    dim_list = [2**i for i in range(3, 10)]
     # Experiment parameters
     # batch_sizes = [2, 4, 6, 8, 10, 20, 30, 50, 100, 'full']
     batch_sizes = [2, 4, 8, 16, 32, 64, 128, 256, 512, 'full']
-    num_iters = 1000  # Number of iterations
+    num_iters = 1500  # Number of iterations
     lr = 2 # Learning rate
-    # Dictionary to hold loss arrays for each batch size
-    losses_dict = {}
+    for dim, batch_size, in zip(dim_list, batch_sizes):
+        logreg = LogReg_DataGenerator(n_data=10000, dim=dim, noise_scale=1e-5)
+        pass
 
-    for batch_size in batch_sizes:
-        x = x_init.copy()
-        losses = []
-        accs = []
-        gds = []
-        num_grads = [0]
-        for i in range(num_iters):
-            if batch_size == 'full':
-                grad, grad_norm = linreg.grad_func(x)  # Full batch gradient
-            else:
-                grad, grad_norm = linreg.batch_grad_func(x, batch_size)  # Minibatch gradient
-            # num_grads.append(num_grads[-1] + batch_size)
-            x = x - lr * grad
-            losses.append(linreg.evaluate(x))
-            accs.append(accuracy(x))
 
-        # Store losses for this batch size
-        losses_dict[batch_size] = losses
-
-    # Plotting
-    plt.figure(figsize=(10, 7))
-    for batch_size, losses in losses_dict.items():
-        plt.plot(losses, label=f'Batch Size = {batch_size}' if batch_size != 'full' else 'Full Batch')
-
-    plt.title('Loss vs. Iterations for Different Batch Sizes')
-    plt.xlabel('Iterations')
-    plt.yscale('log')
-    plt.ylabel('Loss (log scale)')
-    plt.legend()
-    plt.show()
-def main():
-    # Initialize Data
-
-    exp()
-    # sweep_batch_size()
-    # linreg = LogReg_DataGenerator(n_data=10000, dim=400, noise_scale=1e-4)
-    # grad_func = linreg.grad_func
-    # evaluate = linreg.evaluate
-    # accuracy = linreg.accuracy
-    # x = linreg.rng.normal(size=linreg.dim)
-    # x_init = x.copy()
-    # lr = 0.19
-    # losses = [evaluate(x)]
-    # accs = [linreg.accuracy(x)]
-    # gds = []
-    # iter = 0
-    # while np.linalg.norm(grad_func(x)[0]) > 1e-3 and iter < 10000:
-    #     grad, grad_norm = grad_func(x)
-    #     gd = gradient_diveristy(grad, grad_norm)
-    #     gds.append(gd / linreg.n_data)
-    #     x = x - lr * grad
-    #     # batch_size = max(int(np.round(gd)),512)
-    #     # print(f"Iteration {i}, Loss: {evaluate(x)}, Gradient Diversity: {gd}")
-    #     losses.append(evaluate(x))
-    #     accs.append(accuracy(x))
-    #     iter += 1
-    #     if iter % 1000 == 0:
-    #         print(f"Iteration {iter}, Loss: {evaluate(x)}, Gradient norm: {np.linalg.norm(grad)}", f"Accuracy: {accuracy(x)}")
-    #
-    #
-    # plt.plot(list(range(len(losses))), losses, label='Full Gradient')
-    # plt.yscale('log')
-    # plt.xlabel('Iteration')
-    # plt.ylabel('Loss')
-    # plt.legend()
-    # plt.show()
-    #
-    #
-    # plt.plot(gds, label=f'Full Gradient')
-    # # plt.plot(gds_adaptive, label='Adaptive Batch Size')
-    # plt.title('Progression of Gradient Diversity')
-    # plt.xlabel('Iteration')
-    # plt.ylabel('Gradient Diversity')
-    # plt.legend()
-    # # plt.savefig('../data/gradient_diversity.png')
-    # plt.show()
 
 
 if __name__ == '__main__':
